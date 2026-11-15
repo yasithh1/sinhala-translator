@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Custom Sinhala → English</title>
+<style>
+  :root{--bg:#10201c;--panel:#17302a;--ink:#f1f5ef;--muted:#9bb5ac;--accent:#ffb84d;--rec:#ff5a4e;--line:#2a4a41}
+  *{box-sizing:border-box}
+  body{margin:0;min-height:100vh;background:var(--bg);color:var(--ink);font-family:system-ui,"Noto Sans Sinhala","Iskoola Pota","Nirmala UI",sans-serif;display:flex;justify-content:center;padding:24px 16px}
+  main{width:100%;max-width:640px}
+  h1{font-size:1.7rem;margin:0 0 4px}
+  .sub{color:var(--muted);margin:0 0 20px}
+  textarea{width:100%;min-height:96px;padding:12px;border-radius:10px;border:1px solid var(--line);background:var(--panel);color:var(--ink);font:inherit;font-size:1.15rem;resize:vertical}
+  .bar{display:flex;gap:10px;align-items:center;margin:12px 0 22px;flex-wrap:wrap}
+  button{font:inherit;cursor:pointer}
+  #go{padding:12px 22px;border-radius:10px;border:0;background:var(--accent);color:#10201c;font-weight:600}
+  #mic{width:48px;height:48px;border-radius:50%;border:0;background:var(--panel);color:var(--ink);font-size:1.3rem;border:1px solid var(--line)}
+  #mic.on{background:var(--rec);animation:pulse 1.2s infinite}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(255,90,78,.6)}100%{box-shadow:0 0 0 16px rgba(255,90,78,0)}}
+  @media (prefers-reduced-motion:reduce){#mic.on{animation:none}}
+  button:focus-visible{outline:3px solid var(--ink);outline-offset:3px}
+  #status{color:var(--muted);flex:1;min-width:140px}
+  .err{color:#ff9d94}
+  .box{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px}
+  .box h2{font-size:.9rem;font-weight:600;color:var(--muted);margin:0 0 8px}
+  .txt{font-size:1.15rem;line-height:1.5;min-height:1.5em;white-space:pre-wrap;word-break:break-word}
+  .row{display:flex;gap:10px;margin-top:10px}
+  .small{padding:8px 14px;border-radius:8px;border:1px solid var(--line);background:transparent;color:var(--ink);font-size:.9rem}
+  .small:hover{background:var(--line)}
+  .ex{margin-top:6px;color:var(--muted);font-size:.9rem}
+  .ex button{margin:4px 6px 0 0}
+</style>
+</head>
+<body>
+<main>
+  <h1>Custom Sinhala Translator</h1>
+  <p class="sub">Type or speak your friends' Sinhala. It decodes the pattern, then translates to English.</p>
+
+  <textarea id="in" aria-label="Custom Sinhala text" placeholder="විවාහාහරතහේ"></textarea>
+  <div class="bar">
+    <button id="mic" aria-label="Speak">🎤</button>
+    <button id="go">Translate</button>
+    <div id="status" role="status"></div>
+  </div>
+  <div class="ex">Try an example:
+    <button class="small" data-t="විවාහාහරතහේ">විවාහාහරතහේ</button>
+    <button class="small" data-t="විමයාළහරතහේ">විමයාළහරතහේ</button>
+    <button class="small" data-t="විතලේබෝහරතහේ">විතලේබෝහරතහේ</button>
+  </div>
+
+  <div class="box" style="margin-top:20px">
+    <h2>Real Sinhala (after decoding)</h2>
+    <div class="txt" id="dec"></div>
+  </div>
+  <div class="box">
+    <h2>English</h2>
+    <div class="txt" id="eng"></div>
+    <div class="row">
+      <button class="small" id="speak">Play English voice</button>
+      <button class="small" id="copy">Copy</button>
+    </div>
+  </div>
+</main>
+
+<script>
+// ---decode---
+// Rule: friends' word = වි + (real word without first syllable) + (first syllable) + ending
+// The ending is හරතහේ, and the ත can carry a vowel sign (හරතාහේ, ...)
+const PRE = 'වි', SUF_RE = /හ[\u0DCF-\u0DDF]?ර[\u0DCF-\u0DDF]?ත[\u0DCF-\u0DDF]?හේ$/u;
+const OVERRIDES = {};   // add special words here, e.g. 'friendsWord': 'realWord'
+const SYL = /[\u0D9A-\u0DC6](?:\u0DCA\u200D?[\u0D9A-\u0DC6])*(?:[\u0DCF-\u0DDF\u0DF2\u0DF3]|\u0DCA)?[\u0D82\u0D83]?|[\u0D85-\u0D96][\u0D82\u0D83]?|[\s\S]/gu;
+
+function decodeWord(w) {
+  if (OVERRIDES[w]) return OVERRIDES[w];
+  const m = w.match(SUF_RE);
+  if (!(w.startsWith(PRE) && m && w.length > PRE.length + m[0].length)) return w;
+  const mid = w.slice(PRE.length, w.length - m[0].length);
+  const t = mid.match(SYL);
+  if (!t) return w;
+  const last = t.pop();          // the syllable that was moved to the end
+  return last + t.join('');      // put it back in front
+}
+function decodeText(s) {
+  return s.split(/(\s+)/).map(p => /^\s+$/.test(p) ? p : decodeWord(p)).join('');
+}
+// ---end decode---
+
+const $ = id => document.getElementById(id);
+const inp = $('in'), dec = $('dec'), eng = $('eng'), statusEl = $('status'), mic = $('mic');
+
+async function run() {
+  const text = inp.value.trim();
+  if (!text) { statusEl.textContent = 'Type or speak something first'; return; }
+  const real = decodeText(text);
+  dec.textContent = real;
+  eng.textContent = '';
+  statusEl.textContent = 'Translating…';
+  try {
+    // Free MyMemory API, no key needed (daily limit applies)
+    const res = await fetch('https://api.mymemory.translated.net/get?q=' + encodeURIComponent(real) + '&langpair=si|en');
+    const data = await res.json();
+    const out = data && data.responseData && data.responseData.translatedText;
+    if (!out) throw new Error('empty');
+    eng.textContent = out;
+    statusEl.textContent = 'Done';
+    speakEnglish();
+  } catch (e) {
+    statusEl.innerHTML = '<span class="err">Translation failed. Check your internet and try again.</span>';
+  }
+}
+$('go').addEventListener('click', run);
+document.querySelectorAll('.ex button').forEach(b => b.addEventListener('click', () => { inp.value = b.dataset.t; run(); }));
+
+// Voice input (Chrome / Edge)
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let rec = null, listening = false, finalText = '';
+if (!SR) { mic.disabled = true; mic.title = 'Voice input needs Chrome or Edge'; }
+mic.addEventListener('click', () => {
+  if (listening) { rec.stop(); return; }
+  finalText = ''; inp.value = '';
+  rec = new SR(); rec.lang = 'si-LK'; rec.interimResults = true; rec.continuous = true;
+  rec.onstart = () => { listening = true; mic.classList.add('on'); statusEl.textContent = 'Listening… tap the mic to stop'; };
+  rec.onresult = e => {
+    let interim = '';
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const t = e.results[i][0].transcript;
+      if (e.results[i].isFinal) finalText += t + ' '; else interim += t;
+    }
+    inp.value = finalText + interim;
+  };
+  rec.onerror = e => { statusEl.innerHTML = '<span class="err">' + (e.error === 'not-allowed' ? 'Microphone is blocked. Allow it in the address bar.' : 'Voice error: ' + e.error) + '</span>'; };
+  rec.onend = () => { listening = false; mic.classList.remove('on'); if (inp.value.trim()) run(); };
+  try { rec.start(); } catch (e) {}
+});
+
+function speakEnglish() {
+  const t = eng.textContent.trim();
+  if (!t || !window.speechSynthesis) return;
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(t); u.lang = 'en-US'; speechSynthesis.speak(u);
+}
+$('speak').addEventListener('click', speakEnglish);
+$('copy').addEventListener('click', () => navigator.clipboard.writeText(eng.textContent).then(() => statusEl.textContent = 'Copied'));
+</script>
+</body>
+</html>
